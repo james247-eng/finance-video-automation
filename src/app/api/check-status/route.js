@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getVideos } from '@/lib/firebase'
+import { getVideos } from '@/lib/firebaseAdmin'
 
 export async function GET(request) {
   try {
