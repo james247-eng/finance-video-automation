@@ -1,6 +1,7 @@
 import axios from 'axios'
 import fs from 'fs'
 import path from 'path'
+import logger from '@/lib/logger'
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY
 const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1'
@@ -22,7 +23,13 @@ export async function generateVoiceover(text, outputPath = null, voiceId = DEFAU
     throw new Error('ELEVENLABS_API_KEY not configured')
   }
 
+  if (!text || typeof text !== 'string') {
+    throw new Error('Text must be a non-empty string')
+  }
+
   try {
+    logger.info(`Generating voiceover for ${text.length} characters`)
+
     const response = await axios.post(
       `${ELEVENLABS_API_URL}/text-to-speech/${voiceId}`,
       {
@@ -47,6 +54,7 @@ export async function generateVoiceover(text, outputPath = null, voiceId = DEFAU
     )
 
     const audioBuffer = Buffer.from(response.data)
+    logger.info(`Generated audio buffer: ${audioBuffer.length} bytes`)
 
     // Save to file if path provided
     if (outputPath) {
@@ -55,13 +63,13 @@ export async function generateVoiceover(text, outputPath = null, voiceId = DEFAU
         fs.mkdirSync(outputDir, { recursive: true })
       }
       fs.writeFileSync(outputPath, audioBuffer)
-      console.log(`Audio saved to ${outputPath}`)
+      logger.info(`Audio saved to ${outputPath}`)
     }
 
     return audioBuffer
 
   } catch (error) {
-    console.error('Error generating voiceover:', error.response?.data || error.message)
+    logger.error('Error generating voiceover:', error.response?.data || error.message)
     
     if (error.response?.status === 401) {
       throw new Error('Invalid ElevenLabs API key')
@@ -80,22 +88,25 @@ export async function generateVoiceoverFromScenes(scenes, voiceId = DEFAULT_VOIC
     throw new Error('ELEVENLABS_API_KEY not configured')
   }
 
+  if (!Array.isArray(scenes) || scenes.length === 0) {
+    throw new Error('Scenes must be a non-empty array')
+  }
+
   try {
     // Combine all voiceover texts with pauses
     const fullScript = scenes
       .map(scene => scene.voiceoverText)
       .join(' ... ') // Natural pause
 
-    console.log(`Generating voiceover for ${scenes.length} scenes`)
-    console.log(`Total characters: ${fullScript.length}`)
+    logger.info(`Generating voiceover for ${scenes.length} scenes, total ${fullScript.length} characters`)
 
     const audioBuffer = await generateVoiceover(fullScript, null, voiceId)
     
-    console.log('Generated combined voiceover successfully')
+    logger.info('Generated combined voiceover successfully')
     return audioBuffer
 
   } catch (error) {
-    console.error('Error generating combined voiceover:', error)
+    logger.error('Error generating combined voiceover:', error)
     throw error
   }
 }
@@ -117,14 +128,17 @@ export async function checkQuota() {
     )
 
     const subscription = response.data.subscription
-    return {
+    const quota = {
       characterCount: subscription.character_count,
       characterLimit: subscription.character_limit,
       remaining: subscription.character_limit - subscription.character_count,
       canSynthesizeFreelyCharacterLimit: subscription.can_synthesize_freely_character_limit || 0
     }
+
+    logger.info(`ElevenLabs quota: ${quota.remaining}/${quota.characterLimit}`)
+    return quota
   } catch (error) {
-    console.error('Error checking quota:', error)
+    logger.error('Error checking quota:', error)
     return null
   }
 }

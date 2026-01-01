@@ -4,10 +4,12 @@ import path from 'path'
 import { generateStickFigureImage } from '@/lib/huggingface'
 import { generateVoiceoverFromScenes } from '@/lib/elevenlabs'
 import { updateVideo, uploadVideoToStorage, uploadImageToStorage } from '@/lib/firebaseAdmin'
+import logger from '@/lib/logger'
 
 const OUTPUT_DIR = path.join(process.cwd(), 'output')
 const TEMP_DIR = path.join(process.cwd(), 'temp')
 
+// Ensure directories exist
 if (!fs.existsSync(OUTPUT_DIR)) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true })
 }
@@ -16,9 +18,13 @@ if (!fs.existsSync(TEMP_DIR)) {
 }
 
 export async function processVideo(videoId, scenes) {
-  console.log(`Starting video processing for ${videoId}`)
+  logger.info(`Starting video processing for ${videoId} with ${scenes.length} scenes`)
   
   try {
+    if (!videoId || !Array.isArray(scenes) || scenes.length === 0) {
+      throw new Error('Invalid videoId or scenes')
+    }
+
     await updateVideo(videoId, {
       status: 'processing',
       progress: 10,
@@ -28,24 +34,29 @@ export async function processVideo(videoId, scenes) {
     const imagePaths = []
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i]
-      console.log(`Generating image for scene ${i + 1}/${scenes.length}`)
+      logger.info(`Generating image for scene ${i + 1}/${scenes.length}`)
       
-      const imageBuffer = await generateStickFigureImage(
-        scene.imagePrompt,
-        scene.sceneNumber
-      )
-      
-      const imagePath = path.join(TEMP_DIR, `${videoId}_scene_${i}.png`)
-      fs.writeFileSync(imagePath, imageBuffer)
-      imagePaths.push(imagePath)
-      
-      await uploadImageToStorage(imageBuffer, videoId, i)
-      
-      const progress = 10 + (i / scenes.length) * 30
-      await updateVideo(videoId, {
-        progress: Math.round(progress),
-        currentStep: `Generated ${i + 1}/${scenes.length} images`
-      })
+      try {
+        const imageBuffer = await generateStickFigureImage(
+          scene.imagePrompt,
+          scene.sceneNumber
+        )
+        
+        const imagePath = path.join(TEMP_DIR, `${videoId}_scene_${i}.png`)
+        fs.writeFileSync(imagePath, imageBuffer)
+        imagePaths.push(imagePath)
+        
+        await uploadImageToStorage(imageBuffer, videoId, i)
+        
+        const progress = 10 + (i / scenes.length) * 30
+        await updateVideo(videoId, {
+          progress: Math.round(progress),
+          currentStep: `Generated ${i + 1}/${scenes.length} images`
+        })
+      } catch (sceneError) {
+        logger.error(`Error processing scene ${i}:`, sceneError)
+        throw new Error(`Failed to process scene ${i}: ${sceneError.message}`)
+      }
     }
 
     await updateVideo(videoId, {
@@ -53,6 +64,7 @@ export async function processVideo(videoId, scenes) {
       currentStep: 'Generating voiceover...'
     })
 
+    logger.info('Generating voiceover from scenes')
     const voiceoverPath = path.join(TEMP_DIR, `${videoId}_voiceover.mp3`)
     const voiceoverBuffer = await generateVoiceoverFromScenes(scenes)
     fs.writeFileSync(voiceoverPath, voiceoverBuffer)
@@ -62,6 +74,7 @@ export async function processVideo(videoId, scenes) {
       currentStep: 'Assembling video...'
     })
 
+    logger.info('Assembling video from images and audio')
     const videoPath = await createVideoFromImages(
       videoId,
       imagePaths,
@@ -74,6 +87,7 @@ export async function processVideo(videoId, scenes) {
       currentStep: 'Uploading video...'
     })
 
+    logger.info('Uploading video to storage')
     const videoBuffer = fs.readFileSync(videoPath)
     const videoUrl = await uploadVideoToStorage(videoBuffer, videoId, scenes[0]?.voiceoverText || 'video')
 
@@ -87,18 +101,23 @@ export async function processVideo(videoId, scenes) {
       currentStep: 'Complete!'
     })
 
+    logger.info(`Video ${videoId} completed successfully`)
     cleanupTempFiles(videoId, imagePaths, voiceoverPath, videoPath)
-
-    console.log(`Video ${videoId} completed successfully`)
+    
     return videoUrl
 
   } catch (error) {
-    console.error(`Error processing video ${videoId}:`, error)
+    logger.error(`Error processing video ${videoId}:`, error)
     
-    await updateVideo(videoId, {
-      status: 'failed',
-      errorMessage: error.message
-    })
+    try {
+      await updateVideo(videoId, {
+        status: 'failed',
+        errorMessage: error.message,
+        progress: 0
+      })
+    } catch (updateError) {
+      logger.error(`Failed to update video status: ${updateError.message}`)
+    }
 
     throw error
   }
@@ -116,7 +135,14 @@ async function createVideoFromImages(videoId, imagePaths, scenes, audioPath) {
       })
       .join('\n')
     
-    fs.writeFileSync(concatFilePath, concatContent)
+    try {
+      fs.writeFileSync(concatFilePath, concatContent)
+    } catch (writeError) {
+      logger.error('Error writing concat file:', writeError)
+      return reject(new Error(`Failed to write concat file: ${writeError.message}`))
+    }
+
+    logger.info(`Creating video with ${imagePaths.length} images`)
 
     ffmpeg()
       .input(concatFilePath)
@@ -134,18 +160,18 @@ async function createVideoFromImages(videoId, imagePaths, scenes, audioPath) {
       ])
       .output(outputPath)
       .on('start', (cmd) => {
-        console.log('FFmpeg command:', cmd)
+        logger.debug('FFmpeg command started')
       })
       .on('progress', (progress) => {
-        console.log(`Processing: ${progress.percent}% done`)
+        logger.debug(`FFmpeg progress: ${progress.percent}%`)
       })
       .on('end', () => {
-        console.log('Video created successfully')
+        logger.info(`Video created successfully: ${outputPath}`)
         resolve(outputPath)
       })
       .on('error', (err, stdout, stderr) => {
-        console.error('FFmpeg error:', err.message)
-        console.error('FFmpeg stderr:', stderr)
+        logger.error('FFmpeg error:', err.message)
+        logger.error('FFmpeg stderr:', stderr)
         reject(new Error(`Video creation failed: ${err.message}`))
       })
       .run()
@@ -154,6 +180,8 @@ async function createVideoFromImages(videoId, imagePaths, scenes, audioPath) {
 
 function cleanupTempFiles(videoId, imagePaths, voiceoverPath, videoPath) {
   try {
+    logger.info('Cleaning up temporary files')
+
     imagePaths.forEach(imgPath => {
       if (fs.existsSync(imgPath)) {
         fs.unlinkSync(imgPath)
@@ -169,8 +197,12 @@ function cleanupTempFiles(videoId, imagePaths, voiceoverPath, videoPath) {
       fs.unlinkSync(concatFilePath)
     }
 
-    console.log('Cleanup completed')
+    if (fs.existsSync(videoPath)) {
+      fs.unlinkSync(videoPath)
+    }
+
+    logger.info('Cleanup completed')
   } catch (error) {
-    console.error('Cleanup error:', error)
+    logger.warn('Non-critical cleanup error:', error.message)
   }
 }

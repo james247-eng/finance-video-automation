@@ -8,8 +8,19 @@ import CompletedVideos from '@/components/CompletedVideos'
 export default function Home() {
   const [videos, setVideos] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showSettings, setShowSettings] = useState(false)
+  const [apiKey, setApiKey] = useState('')
+  const [tempApiKey, setTempApiKey] = useState('')
 
   useEffect(() => {
+    // Load API key from localStorage
+    const savedKey = localStorage.getItem('apiKey')
+    if (savedKey) {
+      setApiKey(savedKey)
+    } else {
+      setShowSettings(true)
+    }
+
     fetchVideos()
     // Poll for updates every 10 seconds
     const interval = setInterval(fetchVideos, 10000)
@@ -32,6 +43,15 @@ export default function Home() {
     fetchVideos()
   }
 
+  const handleSaveApiKey = () => {
+    if (tempApiKey.trim()) {
+      localStorage.setItem('apiKey', tempApiKey.trim())
+      setApiKey(tempApiKey.trim())
+      setTempApiKey('')
+      setShowSettings(false)
+    }
+  }
+
   const processingVideos = videos.filter(v => 
     v.status === 'pending' || v.status === 'processing'
   )
@@ -41,7 +61,25 @@ export default function Home() {
 
   return (
     <div className="container">
-      <header style={{ textAlign: 'center', marginBottom: '3rem' }}>
+      <header style={{ textAlign: 'center', marginBottom: '3rem', position: 'relative' }}>
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            padding: '0.5rem 1rem',
+            backgroundColor: '#667eea',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '0.875rem'
+          }}
+        >
+          ⚙️ {apiKey ? 'Settings' : 'Configure'}
+        </button>
+
         <h1 style={{ 
           color: 'white', 
           fontSize: '3rem', 
@@ -57,6 +95,48 @@ export default function Home() {
           AI-Powered Financial Education Video Generator
         </p>
       </header>
+
+      {showSettings && (
+        <div className="card" style={{ marginBottom: '2rem', backgroundColor: '#f0f4ff', border: '2px solid #667eea' }}>
+          <h3 style={{ color: '#2d3748', marginBottom: '1rem' }}>🔑 API Configuration</h3>
+          <p style={{ color: '#718096', marginBottom: '1rem', fontSize: '0.875rem' }}>
+            Enter your API secret key to enable video generation:
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              type="password"
+              className="input"
+              value={tempApiKey}
+              onChange={(e) => setTempApiKey(e.target.value)}
+              placeholder="Enter your API secret key"
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') handleSaveApiKey()
+              }}
+            />
+            <button
+              onClick={handleSaveApiKey}
+              className="btn btn-primary"
+              disabled={!tempApiKey.trim()}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              Save
+            </button>
+          </div>
+          {apiKey && (
+            <p style={{ color: '#22863a', marginTop: '0.5rem', fontSize: '0.875rem' }}>
+              ✅ API key is configured
+            </p>
+          )}
+        </div>
+      )}
+
+      {!apiKey && (
+        <div className="card" style={{ marginBottom: '2rem', backgroundColor: '#fef3c7', border: '2px solid #f59e0b' }}>
+          <p style={{ color: '#92400e', margin: 0 }}>
+            ⚠️ <strong>API key not configured.</strong> Please click the "Configure" button above to add your API secret key.
+          </p>
+        </div>
+      )}
 
       <VideoGenerator onVideoGenerated={handleVideoGenerated} />
 
@@ -92,9 +172,14 @@ export default function Home() {
         textAlign: 'center', 
         color: 'rgba(255,255,255,0.7)', 
         marginTop: '4rem',
-        paddingBottom: '2rem'
+        paddingBottom: '2rem',
+        fontSize: '0.875rem'
       }}>
-        <p>Built with AI • Powered by Automation</p>
+        <p>Built with AI • Powered by Automation • Version 1.0.0</p>
+        <p style={{ marginTop: '0.5rem', color: 'rgba(255,255,255,0.5)' }}>
+          📚 <a href="https://github.com" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'underline' }}>Documentation</a> • 
+          🐛 <a href="https://github.com" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'underline' }}>Report Issues</a>
+        </p>
       </footer>
     </div>
   )

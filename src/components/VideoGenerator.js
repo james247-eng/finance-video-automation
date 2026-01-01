@@ -10,16 +10,50 @@ export default function VideoGenerator({ onVideoGenerated }) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    
+  const validateForm = () => {
     if (!script.trim()) {
       setError('Please enter a script')
-      return
+      return false
+    }
+
+    if (script.trim().length < 10) {
+      setError('Script must be at least 10 characters long')
+      return false
+    }
+
+    if (script.trim().length > 10000) {
+      setError('Script cannot exceed 10000 characters')
+      return false
     }
 
     if (!title.trim()) {
       setError('Please enter a video title')
+      return false
+    }
+
+    if (title.trim().length < 3) {
+      setError('Title must be at least 3 characters long')
+      return false
+    }
+
+    if (title.trim().length > 200) {
+      setError('Title cannot exceed 200 characters')
+      return false
+    }
+
+    const length = parseInt(videoLength)
+    if (length < 30 || length > 900) {
+      setError('Video length must be between 30 and 900 seconds')
+      return false
+    }
+
+    return true
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    
+    if (!validateForm()) {
       return
     }
 
@@ -28,10 +62,18 @@ export default function VideoGenerator({ onVideoGenerated }) {
     setSuccess('')
 
     try {
+      const apiKey = localStorage.getItem('apiKey')
+      if (!apiKey) {
+        setError('API key not configured. Please set it in settings.')
+        setLoading(false)
+        return
+      }
+
       const response = await fetch('/api/generate-video', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-api-key': apiKey,
         },
         body: JSON.stringify({
           script: script.trim(),
@@ -43,10 +85,10 @@ export default function VideoGenerator({ onVideoGenerated }) {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate video')
+        throw new Error(data.error || data.details?.[0] || 'Failed to generate video')
       }
 
-      setSuccess(`Video "${title}" queued successfully! Processing will begin shortly.`)
+      setSuccess(`Video "${title}" queued successfully! Processing will begin shortly. ${data.sceneCount} scenes will be generated.`)
       setScript('')
       setTitle('')
       
@@ -56,10 +98,11 @@ export default function VideoGenerator({ onVideoGenerated }) {
 
       setTimeout(() => {
         setSuccess('')
-      }, 5000)
+      }, 6000)
 
     } catch (err) {
-      setError(err.message || 'Something went wrong')
+      setError(err.message || 'Something went wrong. Please try again.')
+      console.error('Error generating video:', err)
     } finally {
       setLoading(false)
     }
@@ -87,9 +130,10 @@ The choice is yours: let these enemies control your financial future, or become 
           backgroundColor: '#fee2e2',
           color: '#991b1b',
           borderRadius: '8px',
-          marginBottom: '1rem'
+          marginBottom: '1rem',
+          border: '1px solid #fca5a5'
         }}>
-          {error}
+          <strong>⚠️ Error:</strong> {error}
         </div>
       )}
 
@@ -99,9 +143,10 @@ The choice is yours: let these enemies control your financial future, or become 
           backgroundColor: '#d1fae5',
           color: '#065f46',
           borderRadius: '8px',
-          marginBottom: '1rem'
+          marginBottom: '1rem',
+          border: '1px solid #6ee7b7'
         }}>
-          {success}
+          <strong>✅ Success:</strong> {success}
         </div>
       )}
 
@@ -113,15 +158,16 @@ The choice is yours: let these enemies control your financial future, or become 
             fontWeight: '600',
             color: '#4a5568'
           }}>
-            Video Title *
+            Video Title * ({title.length}/200)
           </label>
           <input
             type="text"
             className="input"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => setTitle(e.target.value.substring(0, 200))}
             placeholder="e.g., The 3 Enemies Keeping You Poor"
             disabled={loading}
+            maxLength="200"
           />
         </div>
 
@@ -132,14 +178,15 @@ The choice is yours: let these enemies control your financial future, or become 
             fontWeight: '600',
             color: '#4a5568'
           }}>
-            Video Script *
+            Video Script * ({script.length}/10000)
           </label>
           <textarea
             className="textarea"
             value={script}
-            onChange={(e) => setScript(e.target.value)}
+            onChange={(e) => setScript(e.target.value.substring(0, 10000))}
             placeholder="Paste your script here..."
             disabled={loading}
+            maxLength="10000"
           />
           <button
             type="button"
@@ -151,9 +198,17 @@ The choice is yours: let these enemies control your financial future, or become 
               border: '1px solid #cbd5e0',
               borderRadius: '6px',
               fontSize: '0.875rem',
-              color: '#4a5568'
+              color: '#4a5568',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
             }}
             disabled={loading}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#edf2f7'
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = 'transparent'
+            }}
           >
             Load Example Script
           </button>
@@ -168,7 +223,7 @@ The choice is yours: let these enemies control your financial future, or become 
           }}>
             Target Video Length
           </label>
-          <div style={{ display: 'flex', gap: '1rem' }}>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
               <input
                 type="radio"
@@ -211,8 +266,11 @@ The choice is yours: let these enemies control your financial future, or become 
         <button
           type="submit"
           className="btn btn-primary"
-          disabled={loading}
-          style={{ width: '100%' }}
+          disabled={loading || !script.trim() || !title.trim()}
+          style={{ 
+            width: '100%',
+            opacity: (!script.trim() || !title.trim()) ? 0.5 : 1
+          }}
         >
           {loading ? (
             <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
@@ -231,7 +289,8 @@ The choice is yours: let these enemies control your financial future, or become 
         backgroundColor: '#f7fafc', 
         borderRadius: '8px',
         fontSize: '0.875rem',
-        color: '#718096'
+        color: '#718096',
+        border: '1px solid #e2e8f0'
       }}>
         <strong>💡 Tips for better videos:</strong>
         <ul style={{ marginTop: '0.5rem', marginLeft: '1.5rem' }}>
@@ -239,6 +298,7 @@ The choice is yours: let these enemies control your financial future, or become 
           <li>Keep sentences short and punchy for better visuals</li>
           <li>Include clear sections or "acts" in your story</li>
           <li>End with a call to action or reflection</li>
+          <li>Between 200-500 words typically works best</li>
         </ul>
       </div>
     </div>

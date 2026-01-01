@@ -48,6 +48,16 @@ Thumbs.db
 *.mp3
 *.wav
 *.png
+
+# Generated files
+logs/
+temp/
+output/
+
+# Temporary
+*.tmp
+*.bak
+
 *.jpg
 *.jpeg
 *.gif

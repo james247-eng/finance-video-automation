@@ -3,6 +3,10 @@
 import { formatDistanceToNow } from 'date-fns'
 
 export default function VideoQueue({ videos }) {
+  if (!videos || videos.length === 0) {
+    return null
+  }
+
   return (
     <div className="card">
       <h2 style={{ marginBottom: '1.5rem', color: '#2d3748' }}>
@@ -17,7 +21,9 @@ export default function VideoQueue({ videos }) {
               padding: '1.5rem',
               border: '2px solid #e2e8f0',
               borderRadius: '8px',
-              backgroundColor: '#f7fafc'
+              backgroundColor: video.status === 'processing' ? '#f0f9ff' : '#f7fafc',
+              borderLeftWidth: '4px',
+              borderLeftColor: video.status === 'processing' ? '#3b82f6' : '#fbbf24'
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
@@ -29,12 +35,20 @@ export default function VideoQueue({ videos }) {
                   Started {formatDistanceToNow(new Date(video.createdAt))} ago
                 </p>
               </div>
-              <span className={`status-badge status-${video.status}`}>
+              <span style={{
+                display: 'inline-block',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '9999px',
+                fontSize: '0.75rem',
+                fontWeight: '600',
+                backgroundColor: video.status === 'pending' ? '#fef3c7' : '#bfdbfe',
+                color: video.status === 'pending' ? '#92400e' : '#1e40af'
+              }}>
                 {video.status === 'pending' ? '⏱️ Pending' : '🔄 Processing'}
               </span>
             </div>
 
-            {video.progress && (
+            {(video.progress !== undefined && video.progress !== null) && (
               <div style={{ marginTop: '1rem' }}>
                 <div style={{ 
                   width: '100%', 
@@ -44,15 +58,24 @@ export default function VideoQueue({ videos }) {
                   overflow: 'hidden'
                 }}>
                   <div style={{
-                    width: `${video.progress}%`,
+                    width: `${Math.min(100, video.progress)}%`,
                     height: '100%',
-                    backgroundColor: '#667eea',
-                    transition: 'width 0.3s'
+                    backgroundColor: video.status === 'processing' ? '#3b82f6' : '#fbbf24',
+                    transition: 'width 0.3s ease'
                   }}></div>
                 </div>
-                <p style={{ fontSize: '0.75rem', color: '#718096', marginTop: '0.5rem' }}>
-                  {video.currentStep || 'Initializing...'}
-                </p>
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between',
+                  marginTop: '0.5rem'
+                }}>
+                  <p style={{ fontSize: '0.75rem', color: '#718096', margin: 0 }}>
+                    {video.currentStep || 'Initializing...'}
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: '#718096', margin: 0, fontWeight: '600' }}>
+                    {video.progress || 0}%
+                  </p>
+                </div>
               </div>
             )}
 
@@ -63,14 +86,34 @@ export default function VideoQueue({ videos }) {
                 backgroundColor: '#fee2e2',
                 color: '#991b1b',
                 borderRadius: '6px',
-                fontSize: '0.875rem'
+                fontSize: '0.875rem',
+                border: '1px solid #fca5a5'
               }}>
-                Error: {video.errorMessage}
+                <strong>❌ Error:</strong> {video.errorMessage}
+              </div>
+            )}
+
+            {video.sceneCount && (
+              <div style={{
+                marginTop: '1rem',
+                fontSize: '0.875rem',
+                color: '#718096'
+              }}>
+                📊 {video.sceneCount} scenes • ⏱️ {video.videoLength || '?'} seconds
               </div>
             )}
           </div>
         ))}
       </div>
+
+      <p style={{ 
+        marginTop: '1rem', 
+        fontSize: '0.875rem', 
+        color: '#a0aec0',
+        fontStyle: 'italic'
+      }}>
+        💬 Tip: Videos are processed one at a time. Please be patient!
+      </p>
     </div>
   )
 }

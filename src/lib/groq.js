@@ -1,10 +1,15 @@
 import Groq from 'groq-sdk'
+import logger from '@/lib/logger'
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
 })
 
 export async function processScriptToScenes(script, targetLength = 60) {
+  if (!script || typeof script !== 'string') {
+    throw new Error('Script must be a non-empty string')
+  }
+
   const scenesNeeded = Math.ceil(targetLength / 5) // Roughly 5 seconds per scene
   
   const prompt = `You are a video script analyzer for "Atlas Economy" - a financial education channel featuring stick figure animations.
@@ -34,6 +39,8 @@ Return ONLY a valid JSON array (no markdown, no explanation) with this exact for
 Keep imagePrompts focused on: stick figure, simple poses, minimal backgrounds, financial metaphors.`
 
   try {
+    logger.info(`Processing script into ${scenesNeeded} scenes`)
+
     const completion = await groq.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
       model: 'llama-3.3-70b-versatile',
@@ -46,24 +53,42 @@ Keep imagePrompts focused on: stick figure, simple poses, minimal backgrounds, f
     // Extract JSON from response (in case AI adds markdown)
     let jsonMatch = response.match(/\[[\s\S]*\]/)
     if (!jsonMatch) {
-      throw new Error('No valid JSON found in AI response')
+      logger.error('No valid JSON found in Groq response')
+      throw new Error('Invalid scene format from AI')
     }
     
     const scenes = JSON.parse(jsonMatch[0])
     
     // Validate scenes
     if (!Array.isArray(scenes) || scenes.length === 0) {
-      throw new Error('Invalid scenes format')
+      throw new Error('Invalid scenes format from AI')
     }
 
-    return scenes
+    // Ensure all scenes have required fields
+    const validatedScenes = scenes.map((scene, idx) => ({
+      sceneNumber: scene.sceneNumber || idx + 1,
+      duration: Math.max(4, Math.min(6, scene.duration || 5)),
+      description: scene.description || 'Scene',
+      imagePrompt: scene.imagePrompt || 'stick figure animation',
+      voiceoverText: scene.voiceoverText || '',
+      background: scene.background || 'simple white background',
+      transition: scene.transition || 'fade'
+    }))
+
+    logger.info(`Successfully processed ${validatedScenes.length} scenes`)
+    return validatedScenes
+
   } catch (error) {
-    console.error('Error processing script with Groq:', error)
+    logger.error('Error processing script with Groq:', error)
     throw new Error(`Script processing failed: ${error.message}`)
   }
 }
 
 export async function generateStoryScript(topic, length = 60) {
+  if (!topic || typeof topic !== 'string') {
+    throw new Error('Topic must be a non-empty string')
+  }
+
   const prompt = `Create a ${length}-second engaging financial education script for "Atlas Economy".
 
 Topic: ${topic}
@@ -78,6 +103,8 @@ Requirements:
 Write the complete script (no formatting, just the narration text):`
 
   try {
+    logger.info(`Generating story script for topic: "${topic}"`)
+
     const completion = await groq.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
       model: 'llama-3.3-70b-versatile',
@@ -85,9 +112,17 @@ Write the complete script (no formatting, just the narration text):`
       max_tokens: 1500,
     })
 
-    return completion.choices[0]?.message?.content || ''
+    const script = completion.choices[0]?.message?.content || ''
+    
+    if (!script || script.length < 20) {
+      throw new Error('Generated script is too short')
+    }
+
+    logger.info(`Generated script with ${script.length} characters`)
+    return script
+
   } catch (error) {
-    console.error('Error generating script with Groq:', error)
+    logger.error('Error generating script with Groq:', error)
     throw new Error(`Script generation failed: ${error.message}`)
   }
 }
