@@ -2,13 +2,12 @@ import ffmpeg from 'fluent-ffmpeg'
 import fs from 'fs'
 import path from 'path'
 import { generateStickFigureImage } from '@/lib/huggingface'
-import { generateVoiceoverFromScenes } from '@/lib/googleTTS'
-import { updateVideo, uploadVideoToStorage, uploadImageToStorage } from '@/lib/firebase'
+import { generateVoiceoverFromScenes } from '@/lib/elevenlabs'
+import { updateVideo, uploadVideoToStorage, uploadImageToStorage } from '@/lib/firebaseAdmin'
 
 const OUTPUT_DIR = path.join(process.cwd(), 'output')
 const TEMP_DIR = path.join(process.cwd(), 'temp')
 
-// Ensure directories exist
 if (!fs.existsSync(OUTPUT_DIR)) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true })
 }
@@ -26,7 +25,6 @@ export async function processVideo(videoId, scenes) {
       currentStep: 'Generating images...'
     })
 
-    // Step 1: Generate all images
     const imagePaths = []
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i]
@@ -37,15 +35,12 @@ export async function processVideo(videoId, scenes) {
         scene.sceneNumber
       )
       
-      // Save image temporarily
       const imagePath = path.join(TEMP_DIR, `${videoId}_scene_${i}.png`)
       fs.writeFileSync(imagePath, imageBuffer)
       imagePaths.push(imagePath)
       
-      // Upload to Firebase Storage
       await uploadImageToStorage(imageBuffer, videoId, i)
       
-      // Update progress
       const progress = 10 + (i / scenes.length) * 30
       await updateVideo(videoId, {
         progress: Math.round(progress),
@@ -53,7 +48,6 @@ export async function processVideo(videoId, scenes) {
       })
     }
 
-    // Step 2: Generate voiceover
     await updateVideo(videoId, {
       progress: 40,
       currentStep: 'Generating voiceover...'
@@ -63,7 +57,6 @@ export async function processVideo(videoId, scenes) {
     const voiceoverBuffer = await generateVoiceoverFromScenes(scenes)
     fs.writeFileSync(voiceoverPath, voiceoverBuffer)
 
-    // Step 3: Create video from images
     await updateVideo(videoId, {
       progress: 60,
       currentStep: 'Assembling video...'
@@ -76,7 +69,6 @@ export async function processVideo(videoId, scenes) {
       voiceoverPath
     )
 
-    // Step 4: Upload to Firebase Storage
     await updateVideo(videoId, {
       progress: 90,
       currentStep: 'Uploading video...'
@@ -85,7 +77,6 @@ export async function processVideo(videoId, scenes) {
     const videoBuffer = fs.readFileSync(videoPath)
     const videoUrl = await uploadVideoToStorage(videoBuffer, videoId, scenes[0]?.voiceoverText || 'video')
 
-    // Step 5: Update database with completion
     const totalDuration = scenes.reduce((sum, scene) => sum + scene.duration, 0)
     
     await updateVideo(videoId, {
@@ -96,7 +87,6 @@ export async function processVideo(videoId, scenes) {
       currentStep: 'Complete!'
     })
 
-    // Step 6: Cleanup temp files
     cleanupTempFiles(videoId, imagePaths, voiceoverPath, videoPath)
 
     console.log(`Video ${videoId} completed successfully`)
@@ -118,7 +108,6 @@ async function createVideoFromImages(videoId, imagePaths, scenes, audioPath) {
   return new Promise((resolve, reject) => {
     const outputPath = path.join(OUTPUT_DIR, `${videoId}.mp4`)
     
-    // Create a concat file for ffmpeg
     const concatFilePath = path.join(TEMP_DIR, `${videoId}_concat.txt`)
     const concatContent = imagePaths
       .map((imgPath, i) => {
@@ -129,7 +118,6 @@ async function createVideoFromImages(videoId, imagePaths, scenes, audioPath) {
     
     fs.writeFileSync(concatFilePath, concatContent)
 
-    // Use ffmpeg to create video
     ffmpeg()
       .input(concatFilePath)
       .inputOptions(['-f concat', '-safe 0'])
@@ -141,8 +129,8 @@ async function createVideoFromImages(videoId, imagePaths, scenes, audioPath) {
         '-crf 23',
         '-c:a aac',
         '-b:a 128k',
-        '-shortest', // End when shortest input ends
-        '-movflags +faststart' // Enable streaming
+        '-shortest',
+        '-movflags +faststart'
       ])
       .output(outputPath)
       .on('start', (cmd) => {
@@ -166,28 +154,20 @@ async function createVideoFromImages(videoId, imagePaths, scenes, audioPath) {
 
 function cleanupTempFiles(videoId, imagePaths, voiceoverPath, videoPath) {
   try {
-    // Delete temporary images
     imagePaths.forEach(imgPath => {
       if (fs.existsSync(imgPath)) {
         fs.unlinkSync(imgPath)
       }
     })
 
-    // Delete voiceover file
     if (fs.existsSync(voiceoverPath)) {
       fs.unlinkSync(voiceoverPath)
     }
 
-    // Delete concat file
     const concatFilePath = path.join(TEMP_DIR, `${videoId}_concat.txt`)
     if (fs.existsSync(concatFilePath)) {
       fs.unlinkSync(concatFilePath)
     }
-
-    // Optionally delete the local video file (if you only want it in Firebase)
-    // if (fs.existsSync(videoPath)) {
-    //   fs.unlinkSync(videoPath)
-    // }
 
     console.log('Cleanup completed')
   } catch (error) {

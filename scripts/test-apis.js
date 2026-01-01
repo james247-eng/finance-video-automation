@@ -56,25 +56,50 @@ async function testHuggingFace() {
   }
 }
 
-async function testGoogleTTS() {
-  console.log('\n=== Testing Google Cloud TTS ===')
+async function testElevenLabs() {
+  console.log('\n=== Testing ElevenLabs API ===')
   try {
-    const textToSpeech = (await import('@google-cloud/text-to-speech')).default
-    const client = new textToSpeech.TextToSpeechClient({
-      keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS
-    })
+    const axios = (await import('axios')).default
     
-    const [response] = await client.synthesizeSpeech({
-      input: { text: 'Testing Google TTS' },
-      voice: { languageCode: 'en-US', name: 'en-US-Neural2-D' },
-      audioConfig: { audioEncoding: 'MP3' },
-    })
+    const response = await axios.post(
+      'https://api.elevenlabs.io/v1/text-to-speech/pNInz6obpgDQGcFmaJgB',
+      {
+        text: 'Testing ElevenLabs voice generation.',
+        model_id: 'eleven_monolingual_v1'
+      },
+      {
+        headers: {
+          'Accept': 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': process.env.ELEVENLABS_API_KEY
+        },
+        responseType: 'arraybuffer',
+      }
+    )
     
-    console.log('✅ Google Cloud TTS: WORKING')
-    console.log('Audio size:', response.audioContent.length, 'bytes')
+    console.log('✅ ElevenLabs API: WORKING')
+    console.log('Audio size:', response.data.length, 'bytes')
+    
+    // Check quota
+    const quotaResponse = await axios.get(
+      'https://api.elevenlabs.io/v1/user',
+      {
+        headers: {
+          'xi-api-key': process.env.ELEVENLABS_API_KEY
+        }
+      }
+    )
+    
+    const sub = quotaResponse.data.subscription
+    console.log(`Quota: ${sub.character_count}/${sub.character_limit} characters used`)
+    
   } catch (error) {
-    console.error('❌ Google Cloud TTS: FAILED')
-    console.error('Error:', error.message)
+    if (error.response?.status === 401) {
+      console.error('❌ ElevenLabs API: INVALID API KEY')
+    } else {
+      console.error('❌ ElevenLabs API: FAILED')
+      console.error('Error:', error.message)
+    }
   }
 }
 
@@ -106,7 +131,7 @@ async function runAllTests() {
   
   await testGroq()
   await testHuggingFace()
-  await testGoogleTTS()
+  await testElevenLabs()
   await testFirebase()
   
   console.log('\n✨ Tests completed!')
