@@ -46,21 +46,40 @@ const app = initializeFirebase();
  * If we just do 'export const adminDb = getFirestore()', it will crash 
  * during the build because the 'app' doesn't exist yet.
  */
-export const adminDb = app ? getFirestore() : null;
-export const adminStorage = app ? getStorage() : null;
+let cachedDb = null;
+let cachedStorage = null;
+
+export function getAdminDb() {
+  if (!cachedDb && app) {
+    cachedDb = getFirestore(app);
+  }
+  return cachedDb;
+}
+
+export function getAdminStorage() {
+  if (!cachedStorage && app) {
+    cachedStorage = getStorage(app);
+  }
+  return cachedStorage;
+}
+
+// For backward compatibility with direct imports
+export const adminDb = getAdminDb();
+export const adminStorage = getAdminStorage();
 
 // --- DATABASE OPERATIONS ---
 
 export async function createVideo(videoData) {
   try {
-    if (!adminDb) throw new Error('Firebase Admin DB not initialized - Check environment variables');
+    const db = getAdminDb();
+    if (!db) throw new Error('Firebase Admin DB not initialized - Check environment variables');
     if (!videoData || typeof videoData !== 'object') {
       throw new Error('Video data must be a valid object')
     }
 
     logger.info(`Creating video: "${videoData.title}"`)
 
-    const docRef = await adminDb.collection('videos').add({
+    const docRef = await db.collection('videos').add({
       ...videoData,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       status: videoData.status || 'pending',
@@ -76,9 +95,10 @@ export async function createVideo(videoData) {
 
 export async function updateVideo(videoId, updates) {
   try {
-    if (!adminDb) throw new Error('Firebase Admin DB not initialized');
+    const db = getAdminDb();
+    if (!db) throw new Error('Firebase Admin DB not initialized');
     
-    await adminDb.collection('videos').doc(videoId).update({
+    await db.collection('videos').doc(videoId).update({
       ...updates,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     })
@@ -92,9 +112,10 @@ export async function updateVideo(videoId, updates) {
 
 export async function getVideos(limitCount = 50) {
   try {
-    if (!adminDb) return []; // Return empty array if DB isn't ready (like during build)
+    const db = getAdminDb();
+    if (!db) return []; // Return empty array if DB isn't ready (like during build)
 
-    const snapshot = await adminDb
+    const snapshot = await db
       .collection('videos')
       .orderBy('createdAt', 'desc')
       .limit(limitCount)
@@ -115,8 +136,9 @@ export async function getVideos(limitCount = 50) {
 }
 
 export async function getVideoById(videoId) {
-  try {
-    if (!adminDb) throw new Error('Firebase Admin DB not initialized');
+  trconst db = getAdminDb();
+    if (!db) throw new Error('Firebase Admin DB not initialized');
+    const doc = await dError('Firebase Admin DB not initialized');
     const doc = await adminDb.collection('videos').doc(videoId).get()
     
     if (!doc.exists) throw new Error(`Video ${videoId} not found`);
@@ -136,9 +158,10 @@ export async function getVideoById(videoId) {
 // --- STORAGE OPERATIONS ---
 
 export async function uploadVideoToStorage(videoBuffer, videoId, title) {
-  try {
-    if (!adminStorage) throw new Error('Firebase Admin Storage not initialized');
+  trconst storage = getAdminStorage();
+    if (!storage) throw new Error('Firebase Admin Storage not initialized');
     
+    const bucket = s
     const bucket = adminStorage.bucket()
     const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 50)
     const fileName = `videos/${videoId}_${sanitizedTitle}.mp4`
@@ -157,8 +180,9 @@ export async function uploadVideoToStorage(videoBuffer, videoId, title) {
   }
 }
 
-export async function uploadImageToStorage(imageBuffer, videoId, sceneNumber) {
-  try {
+expoconst storage = getAdminStorage();
+    if (!storage) throw new Error('Firebase Admin Storage not initialized');
+    const bucket = s
     if (!adminStorage) throw new Error('Firebase Admin Storage not initialized');
     const bucket = adminStorage.bucket()
     const fileName = `images/${videoId}_scene_${sceneNumber}.png`
