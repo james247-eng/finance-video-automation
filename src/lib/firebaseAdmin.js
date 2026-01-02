@@ -6,6 +6,7 @@ import logger from '@/lib/logger'
 
 // 1. Lazy Initialization Helper
 const initializeFirebase = () => {
+  // Check if already initialized
   if (admin.apps.length > 0) return admin.apps[0];
 
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
@@ -24,6 +25,7 @@ const initializeFirebase = () => {
       credential: admin.credential.cert({
         projectId: projectId,
         clientEmail: clientEmail,
+        // The replace() is critical for Vercel to handle newlines correctly
         privateKey: privateKey.replace(/\\n/g, '\n'),
       }),
       storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
@@ -36,18 +38,22 @@ const initializeFirebase = () => {
   }
 }
 
-// Initialize only once
+// Initialize the app
 const app = initializeFirebase();
 
-// 2. Safely Export Database and Storage
-// Use a proxy or check for app existence to prevent "project_id" errors during build
+/**
+ * 2. CRITICAL FIX: We use a Getter function or a check for the DB.
+ * If we just do 'export const adminDb = getFirestore()', it will crash 
+ * during the build because the 'app' doesn't exist yet.
+ */
 export const adminDb = app ? getFirestore() : null;
 export const adminStorage = app ? getStorage() : null;
 
-// Database operations (SERVER-SIDE)
+// --- DATABASE OPERATIONS ---
+
 export async function createVideo(videoData) {
   try {
-    if (!adminDb) throw new Error('Firebase Admin DB not initialized');
+    if (!adminDb) throw new Error('Firebase Admin DB not initialized - Check environment variables');
     if (!videoData || typeof videoData !== 'object') {
       throw new Error('Video data must be a valid object')
     }
@@ -57,7 +63,7 @@ export async function createVideo(videoData) {
     const docRef = await adminDb.collection('videos').add({
       ...videoData,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      // status: 'pending', // This is now handled in generate-video/route.js
+      status: videoData.status || 'pending',
     })
 
     logger.info(`Video created with ID: ${docRef.id}`)
@@ -71,16 +77,7 @@ export async function createVideo(videoData) {
 export async function updateVideo(videoId, updates) {
   try {
     if (!adminDb) throw new Error('Firebase Admin DB not initialized');
-    if (!videoId || typeof videoId !== 'string') {
-      throw new Error('Video ID must be a valid string')
-    }
-
-    if (!updates || typeof updates !== 'object') {
-      throw new Error('Updates must be a valid object')
-    }
-
-    logger.debug(`Updating video ${videoId}:`, updates)
-
+    
     await adminDb.collection('videos').doc(videoId).update({
       ...updates,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -95,12 +92,7 @@ export async function updateVideo(videoId, updates) {
 
 export async function getVideos(limitCount = 50) {
   try {
-    if (!adminDb) throw new Error('Firebase Admin DB not initialized');
-    if (!Number.isInteger(limitCount) || limitCount < 1) {
-      throw new Error('Limit must be a positive integer')
-    }
-
-    logger.info(`Fetching ${limitCount} videos`)
+    if (!adminDb) return []; // Return empty array if DB isn't ready (like during build)
 
     const snapshot = await adminDb
       .collection('videos')
@@ -115,7 +107,6 @@ export async function getVideos(limitCount = 50) {
       updatedAt: doc.data().updatedAt?.toDate()?.toISOString() || null,
     }))
 
-    logger.info(`Fetched ${videos.length} videos`)
     return videos
   } catch (error) {
     logger.error('Error getting videos:', error)
@@ -126,15 +117,9 @@ export async function getVideos(limitCount = 50) {
 export async function getVideoById(videoId) {
   try {
     if (!adminDb) throw new Error('Firebase Admin DB not initialized');
-    if (!videoId || typeof videoId !== 'string') {
-      throw new Error('Video ID must be a valid string')
-    }
-
     const doc = await adminDb.collection('videos').doc(videoId).get()
     
-    if (!doc.exists) {
-      throw new Error(`Video ${videoId} not found`)
-    }
+    if (!doc.exists) throw new Error(`Video ${videoId} not found`);
 
     return {
       id: doc.id,
@@ -148,34 +133,24 @@ export async function getVideoById(videoId) {
   }
 }
 
-// Storage operations (SERVER-SIDE)
+// --- STORAGE OPERATIONS ---
+
 export async function uploadVideoToStorage(videoBuffer, videoId, title) {
   try {
     if (!adminStorage) throw new Error('Firebase Admin Storage not initialized');
-    if (!Buffer.isBuffer(videoBuffer)) {
-      throw new Error('Video must be a valid buffer')
-    }
-
+    
     const bucket = adminStorage.bucket()
     const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 50)
     const fileName = `videos/${videoId}_${sanitizedTitle}.mp4`
     const file = bucket.file(fileName)
     
-    logger.info(`Uploading video ${videoId} to storage (${videoBuffer.length} bytes)`)
-
     await file.save(videoBuffer, {
       contentType: 'video/mp4',
-      metadata: {
-        cacheControl: 'public, max-age=31536000',
-      },
+      metadata: { cacheControl: 'public, max-age=31536000' },
     })
     
     await file.makePublic()
-    
-    const videoUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`
-    logger.info(`Video uploaded: ${videoUrl}`)
-    
-    return videoUrl
+    return `https://storage.googleapis.com/${bucket.name}/${fileName}`
   } catch (error) {
     logger.error('Error uploading video:', error)
     throw error
