@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Script from 'next/script'
 import VideoGenerator from '@/components/VideoGenerator'
 import VideoQueue from '@/components/VideoQueue'
 import CompletedVideos from '@/components/CompletedVideos'
@@ -13,16 +14,15 @@ export default function Home() {
   const [tempApiKey, setTempApiKey] = useState('')
 
   useEffect(() => {
-    // Load API key from localStorage
     const savedKey = localStorage.getItem('apiKey')
     if (savedKey) {
       setApiKey(savedKey)
+      setTempApiKey(savedKey)
     } else {
       setShowSettings(true)
     }
 
     fetchVideos()
-    // Poll for updates every 10 seconds
     const interval = setInterval(fetchVideos, 10000)
     return () => clearInterval(interval)
   }, [])
@@ -39,148 +39,88 @@ export default function Home() {
     }
   }
 
-  const handleVideoGenerated = () => {
-    fetchVideos()
+  const saveSettings = () => {
+    localStorage.setItem('apiKey', tempApiKey)
+    setApiKey(tempApiKey)
+    setShowSettings(false)
+    window.location.reload() // Refresh to apply key to all components
   }
-
-  const handleSaveApiKey = () => {
-    if (tempApiKey.trim()) {
-      localStorage.setItem('apiKey', tempApiKey.trim())
-      setApiKey(tempApiKey.trim())
-      setTempApiKey('')
-      setShowSettings(false)
-    }
-  }
-
-  const processingVideos = videos.filter(v => 
-    v.status === 'pending' || v.status === 'processing'
-  )
-  const completedVideos = videos.filter(v => 
-    v.status === 'completed'
-  )
 
   return (
-    <div className="container">
-      <header style={{ textAlign: 'center', marginBottom: '3rem', position: 'relative' }}>
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            padding: '0.5rem 1rem',
-            backgroundColor: '#667eea',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '0.875rem'
-          }}
-        >
-          ⚙️ {apiKey ? 'Settings' : 'Configure'}
-        </button>
+    <main className="container">
+      {/* IonIcons CDN Initialization */}
+      <Script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js" />
+      <Script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js" />
 
-        <h1 style={{ 
-          color: 'white', 
-          fontSize: '3rem', 
-          marginBottom: '0.5rem',
-          textShadow: '0 2px 4px rgba(0,0,0,0.2)'
-        }}>
-          💼 Atlas Economy
-        </h1>
-        <p style={{ 
-          color: 'rgba(255,255,255,0.9)', 
-          fontSize: '1.25rem' 
-        }}>
-          AI-Powered Financial Education Video Generator
-        </p>
+      <header>
+        <div>
+          <h1>Finance Automation</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>AI Video Engine v1.0</p>
+        </div>
+        <button className="btn btn-outline" onClick={() => setShowSettings(true)}>
+          <ion-icon name="settings-outline"></ion-icon>
+          Settings
+        </button>
       </header>
 
+      {/* Settings Sidebar */}
       {showSettings && (
-        <div className="card" style={{ marginBottom: '2rem', backgroundColor: '#f0f4ff', border: '2px solid #667eea' }}>
-          <h3 style={{ color: '#2d3748', marginBottom: '1rem' }}>🔑 API Configuration</h3>
-          <p style={{ color: '#718096', marginBottom: '1rem', fontSize: '0.875rem' }}>
-            Enter your API secret key to enable video generation:
-          </p>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <input
-              type="password"
-              className="input"
-              value={tempApiKey}
-              onChange={(e) => setTempApiKey(e.target.value)}
-              placeholder="Enter your API secret key"
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') handleSaveApiKey()
-              }}
-            />
-            <button
-              onClick={handleSaveApiKey}
-              className="btn btn-primary"
-              disabled={!tempApiKey.trim()}
-              style={{ whiteSpace: 'nowrap' }}
-            >
-              Save
-            </button>
-          </div>
-          {apiKey && (
-            <p style={{ color: '#22863a', marginTop: '0.5rem', fontSize: '0.875rem' }}>
-              ✅ API key is configured
-            </p>
-          )}
-        </div>
-      )}
-
-      {!apiKey && (
-        <div className="card" style={{ marginBottom: '2rem', backgroundColor: '#fef3c7', border: '2px solid #f59e0b' }}>
-          <p style={{ color: '#92400e', margin: 0 }}>
-            ⚠️ <strong>API key not configured.</strong> Please click the "Configure" button above to add your API secret key.
-          </p>
-        </div>
-      )}
-
-      <VideoGenerator onVideoGenerated={handleVideoGenerated} />
-
-      {loading ? (
-        <div style={{ textAlign: 'center', color: 'white', marginTop: '2rem' }}>
-          <div className="spinner" style={{ margin: '0 auto' }}></div>
-          <p style={{ marginTop: '1rem' }}>Loading videos...</p>
-        </div>
-      ) : (
-        <>
-          {processingVideos.length > 0 && (
-            <VideoQueue videos={processingVideos} />
-          )}
-          
-          {completedVideos.length > 0 && (
-            <CompletedVideos videos={completedVideos} />
-          )}
-
-          {videos.length === 0 && (
-            <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-              <h3 style={{ color: '#718096', marginBottom: '0.5rem' }}>
-                No videos yet
-              </h3>
-              <p style={{ color: '#a0aec0' }}>
-                Generate your first video above to get started!
+        <div className="settings-overlay" onClick={() => setShowSettings(false)}>
+          <div className="settings-panel" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+              <h2 style={{ fontSize: '1.25rem' }}>System Settings</h2>
+              <button className="btn" onClick={() => setShowSettings(false)}>
+                <ion-icon name="close-outline"></ion-icon>
+              </button>
+            </div>
+            
+            <div className="form-group">
+              <label style={{ fontSize: '0.875rem', fontWeight: '600' }}>Master API Key</label>
+              <input 
+                type="password" 
+                className="input" 
+                placeholder="Enter your secret key..."
+                value={tempApiKey}
+                onChange={(e) => setTempApiKey(e.target.value)}
+              />
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                This key is required to authenticate video generation requests.
               </p>
             </div>
-          )}
-        </>
+
+            <button 
+              className="btn btn-primary" 
+              style={{ width: '100%', marginTop: '2rem' }}
+              onClick={saveSettings}
+            >
+              Save Configuration
+            </button>
+          </div>
+        </div>
       )}
 
-      <footer style={{ 
-        textAlign: 'center', 
-        color: 'rgba(255,255,255,0.7)', 
-        marginTop: '4rem',
-        paddingBottom: '2rem',
-        fontSize: '0.875rem'
-      }}>
-        <p>Built with AI • Powered by Automation • Version 1.0.0</p>
-        <p style={{ marginTop: '0.5rem', color: 'rgba(255,255,255,0.5)' }}>
-          📚 <a href="https://github.com" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'underline' }}>Documentation</a> • 
-          🐛 <a href="https://github.com" style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'underline' }}>Report Issues</a>
+      {/* Main Content Area */}
+      <div style={{ display: 'grid', gap: '2rem' }}>
+        <VideoGenerator onVideoGenerated={fetchVideos} />
+
+        {loading ? (
+          <div className="card" style={{ textAlign: 'center' }}>
+            <div className="spinner"></div>
+            <p style={{ marginTop: '1rem', color: 'var(--text-muted)' }}>Syncing with server...</p>
+          </div>
+        ) : (
+          <>
+            <VideoQueue videos={videos.filter(v => v.status !== 'completed' && v.status !== 'failed')} />
+            <CompletedVideos videos={videos.filter(v => v.status === 'completed')} />
+          </>
+        )}
+      </div>
+
+      <footer style={{ marginTop: '4rem', textAlign: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '2rem' }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+          &copy; 2026 Atlas Economy Automation. All rights reserved.
         </p>
       </footer>
-    </div>
+    </main>
   )
 }
