@@ -1,3 +1,5 @@
+
+/*
 import { NextResponse } from 'next/server'
 import { createVideo } from '@/lib/firebaseAdmin'
 import { processScriptToScenes } from '@/lib/groq'
@@ -89,3 +91,96 @@ async function handler(request) {
 }
 
 export const POST = withErrorHandling(handler)
+*/
+import { createVideo } from '@/lib/firebaseAdmin';
+import logger from '@/lib/logger';
+
+export default async function handler(req, res) {
+  // 1. Security Check
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey !== process.env.API_SECRET_KEY) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid API Key' });
+  }
+
+  try {
+    const { script, title, videoLength } = req.body;
+
+    // Validate inputs
+    if (!script || !title || !videoLength) {
+      return res.status(400).json({ error: 'Missing required fields: script, title, videoLength' });
+    }
+
+    // Process script into AI-generated scenes using Groq
+    logger.info('Processing script into scenes with Groq AI...');
+    const { processScriptToScenes } = await import('@/lib/groq');
+    const scenes = await processScriptToScenes(script, videoLength);
+    
+    if (!scenes || scenes.length === 0) {
+      throw new Error('No scenes generated from script. Check Groq API configuration.');
+    }
+
+    // Create entry in Firebase with scene data
+    logger.info(`Creating video record with ${scenes.length} scenes`);
+    const videoId = await createVideo({
+      title: title.trim(),
+      script: script.trim(),
+      videoLength: videoLength,
+      sceneCount: scenes.length,
+      scenes: scenes,
+      status: 'queued',
+      pTrigger GitHub Actions worker via repository_dispatch
+    logger.info(`Triggering GitHub Actions for video ${videoId}`);
+    const GITHUB_REPO = "james247-eng/finance-video-automation";
+    const GITHUB_TOKEN = process.env.MY_GITHUB_TOKEN;
+    
+    if (!GITHUB_TOKEN) {
+      throw new Error('MY_GITHUB_TOKEN not configured in environment variables');
+    }
+
+    const githubResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/dispatches`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `token ${GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        event_type: 'start-video-render',
+        client_payload: {
+          videoId: videoId,
+          title: title,
+          scenes: scenes
+        }
+      }),
+    });
+
+    if Respond to frontend with 202 Accepted (processing has started)
+    return res.status(202).json({
+      success: true,
+      videoId,
+      message: 'Video queued for rendering on GitHub Actions',
+      sceneCount: scenes.length,
+      estimatedTime: '2-5 minutes depending on queue'
+    logger.info(`Successfully triggered GitHub Actions for video ${videoId}`);
+    if (!githubResponse.ok) {
+      const errorText = await githubResponse.text();
+      throw new Error(`GitHub Trigger Failed: ${errorText}`);
+    }
+
+    // 5. Respond to Frontend immediately
+    return res.status(202).json({
+      success: true,
+      videoId,
+      message: "Video is being rendered on GitHub Actions.",
+      sceneCount: scenes.length
+    });
+
+  } catch (error) {
+    logger.error('API Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+}

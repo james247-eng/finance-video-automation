@@ -1,0 +1,38 @@
+name: Render Video Worker
+on:
+  repository_dispatch:
+    types: [start-video-render] # This is the "signal" Vercel will send
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Video Script
+        run: node scripts/render.js
+        env:
+          # Pass video data from GitHub dispatch event
+          VIDEO_ID: ${{ github.event.client_payload.videoId }}
+          VIDEO_TITLE: ${{ github.event.client_payload.title }}
+          SCENES: ${{ toJSON(github.event.client_payload.scenes) }}
+          # Firebase Admin Credentials
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          # AI Service API Keys
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
+          # Node environment
+          NODE_ENV: production

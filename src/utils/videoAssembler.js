@@ -1,10 +1,14 @@
 import ffmpeg from 'fluent-ffmpeg'
+import ffmpegStatic from 'ffmpeg-static'
 import fs from 'fs'
 import path from 'path'
 import { generateStickFigureImage } from '@/lib/huggingface'
 import { generateVoiceoverFromScenes } from '@/lib/elevenlabs'
 import { updateVideo, uploadVideoToStorage, uploadImageToStorage } from '@/lib/firebaseAdmin'
 import logger from '@/lib/logger'
+
+// Configure FFmpeg binary path for GitHub Actions and local environments
+ffmpeg.setFfmpegPath(ffmpegStatic)
 
 const OUTPUT_DIR = path.join(process.cwd(), 'output')
 const TEMP_DIR = path.join(process.cwd(), 'temp')
