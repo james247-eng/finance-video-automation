@@ -136,10 +136,10 @@ export async function getVideos(limitCount = 50) {
 }
 
 export async function getVideoById(videoId) {
-  trconst db = getAdminDb();
+  try {
+    const db = getAdminDb();
     if (!db) throw new Error('Firebase Admin DB not initialized');
-    const doc = await dError('Firebase Admin DB not initialized');
-    const doc = await adminDb.collection('videos').doc(videoId).get()
+    const doc = await db.collection('videos').doc(videoId).get()
     
     if (!doc.exists) throw new Error(`Video ${videoId} not found`);
 
@@ -158,11 +158,11 @@ export async function getVideoById(videoId) {
 // --- STORAGE OPERATIONS ---
 
 export async function uploadVideoToStorage(videoBuffer, videoId, title) {
-  trconst storage = getAdminStorage();
+  try {
+    const storage = getAdminStorage();
     if (!storage) throw new Error('Firebase Admin Storage not initialized');
     
-    const bucket = s
-    const bucket = adminStorage.bucket()
+    const bucket = storage.bucket()
     const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 50)
     const fileName = `videos/${videoId}_${sanitizedTitle}.mp4`
     const file = bucket.file(fileName)
@@ -180,11 +180,11 @@ export async function uploadVideoToStorage(videoBuffer, videoId, title) {
   }
 }
 
-expoconst storage = getAdminStorage();
+export async function uploadImageToStorage(imageBuffer, videoId, sceneNumber) {
+  try {
+    const storage = getAdminStorage();
     if (!storage) throw new Error('Firebase Admin Storage not initialized');
-    const bucket = s
-    if (!adminStorage) throw new Error('Firebase Admin Storage not initialized');
-    const bucket = adminStorage.bucket()
+    const bucket = storage.bucket()
     const fileName = `images/${videoId}_scene_${sceneNumber}.png`
     const file = bucket.file(fileName)
     
