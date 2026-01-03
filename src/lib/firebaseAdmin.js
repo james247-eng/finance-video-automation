@@ -1,91 +1,59 @@
-// src/lib/firebaseAdmin.js
 import admin from 'firebase-admin'
 import { getFirestore } from 'firebase-admin/firestore'
-import { getStorage } from 'firebase-admin/storage'
 import logger from '@/lib/logger'
 
-/**
- * FINAL INITIALIZATION LOGIC
- * Designed to prevent "16 UNAUTHENTICATED" errors by strictly 
- * formatting the Private Key for Google OAuth2.
- */
 const initializeFirebase = () => {
   if (admin.apps.length > 0) return admin.apps[0];
 
-  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  // We only need this ONE variable now!
+  const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
 
-  if (!projectId || !clientEmail || !privateKey) {
-    logger.warn('Firebase environment variables are missing.');
+  if (!serviceAccountRaw) {
+    logger.warn('FIREBASE_SERVICE_ACCOUNT missing from environment.');
     return null;
   }
 
   try {
-    // Aggressive cleaning to fix OAuth2 credential issues
-    const cleanKey = privateKey
-      .replace(/\\n/g, '\n')           // Fixes escaped newlines
-      .replace(/^"(.*)"$/, '$1')      // Removes outer quotes
-      .replace(/"""/g, '"')           // Fixes triple quotes
-      .trim();
+    // 1. Parse the string into a real JSON object
+    const serviceAccount = JSON.parse(serviceAccountRaw);
+
+    // 2. Surgical fix for the private key specifically (standard protocol)
+    if (serviceAccount.private_key) {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
 
     return admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: projectId,
-        clientEmail: clientEmail,
-        privateKey: cleanKey,
-      }),
+      credential: admin.credential.cert(serviceAccount),
       storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
     });
   } catch (error) {
-    logger.error('Firebase Admin Initialization Failed:', error.message);
+    logger.error('Firebase JSON Parse Error:', error.message);
     return null;
   }
 }
 
 const app = initializeFirebase();
 
-// --- EXPORTED DATABASE FUNCTIONS ---
+// --- EXPORTED FUNCTIONS ---
+// These names match exactly what your routes expect, so nothing breaks.
 
-export function getAdminDb() {
-  return app ? getFirestore(app) : null;
-}
+export function getAdminDb() { return app ? getFirestore(app) : null; }
 
 export async function createVideo(data) {
-  try {
-    const db = getAdminDb();
-    if (!db) throw new Error("Database not initialized - Check Private Key format");
-
-    const docRef = await db.collection('videos').add({
-      ...data,
-      status: data.status || 'queued',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-
-    logger.info(`Successfully created video in Firebase: ${docRef.id}`);
-    return docRef.id;
-  } catch (error) {
-    logger.error('Firestore createVideo failed:', error.message);
-    throw error; // Let the route handle the error message
-  }
+  const db = getAdminDb();
+  if (!db) throw new Error("Firebase not ready. Check your JSON in Vercel.");
+  
+  const docRef = await db.collection('videos').add({
+    ...data,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+  return docRef.id;
 }
 
-// Keeping these for dashboard compatibility
 export async function getVideos(limitCount = 50) {
-  try {
-    const db = getAdminDb();
-    if (!db) return [];
-    const snapshot = await db.collection('videos').orderBy('createdAt', 'desc').limit(limitCount).get();
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate()?.toISOString() || null,
-    }));
-  } catch (error) {
-    return [];
-  }
+  const db = getAdminDb();
+  if (!db) return [];
+  const snapshot = await db.collection('videos').orderBy('createdAt', 'desc').limit(limitCount).get();
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
-
-// Named exports to ensure no "not a function" conflicts
-export const adminDb = getAdminDb();
