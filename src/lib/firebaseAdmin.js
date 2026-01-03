@@ -1,102 +1,102 @@
-// SERVER-SIDE ONLY - Never imported in client components
+// src/lib/firebaseAdmin.js
 import admin from 'firebase-admin'
 import { getFirestore } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
 import logger from '@/lib/logger'
 
-// 1. Lazy Initialization Helper
+// 1. INITIALIZATION LOGIC
 const initializeFirebase = () => {
-  // Check if already initialized
   if (admin.apps.length > 0) return admin.apps[0];
 
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-  // Next.js 15 checks this file during build. If variables are missing, we skip init.
   if (!projectId || !clientEmail || !privateKey) {
-    logger.warn('Firebase environment variables are missing. Skipping initialization during build phase.');
+    logger.warn('Firebase variables missing. Skipping init.');
     return null;
   }
 
   try {
-    /**
-     * FIX: Surgical cleaning of the Private Key.
-     * 1. Replaces literal '\n' with actual newlines.
-     * 2. Removes accidental outer quotes added by environment managers.
-     * 3. Trims whitespace that causes "Invalid Key" errors.
-     */
-    const cleanKey = privateKey
-      .replace(/\\n/g, '\n')
-      .replace(/^"(.*)"$/, '$1')
-      .trim();
-
-    const app = admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: projectId,
-        clientEmail: clientEmail,
-        privateKey: cleanKey,
-      }),
+    const cleanKey = privateKey.replace(/\\n/g, '\n').replace(/^"(.*)"$/, '$1').trim();
+    return admin.initializeApp({
+      credential: admin.credential.cert({ projectId, clientEmail, privateKey: cleanKey }),
       storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    })
-    
-    logger.info('Firebase Admin initialized successfully');
-    return app;
+    });
   } catch (error) {
-    logger.error('Failed to initialize Firebase Admin:', error.message);
+    logger.error('Firebase Init Error:', error.message);
     return null;
   }
 }
 
-// Initialize the app safely
 const app = initializeFirebase();
 
-let cachedDb = null;
-let cachedStorage = null;
+// 2. EXPORTED HELPER FUNCTIONS
+// These are the "Exports" your other files use!
+export function getAdminDb() { return app ? getFirestore(app) : null; }
+export function getAdminStorage() { return app ? getStorage(app).bucket() : null; }
 
-// Helper to get DB instance safely
-export function getAdminDb() {
-  if (!cachedDb && app) {
-    cachedDb = getFirestore(app);
+/**
+ * Adds a new video to the 'videos' collection
+ */
+export async function createVideo(data) {
+  try {
+    const db = getAdminDb();
+    if (!db) throw new Error("Database not initialized");
+
+    const docRef = await db.collection('videos').add({
+      ...data,
+      status: data.status || 'queued',
+      progress: 0,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    logger.info(`Video record created: ${docRef.id}`);
+    return docRef.id;
+  } catch (error) {
+    logger.error('createVideo Error:', error);
+    throw error;
   }
-  return cachedDb;
 }
 
-// Helper to get Storage instance safely
-export function getAdminStorage() {
-  if (!cachedStorage && app) {
-    cachedStorage = getStorage(app);
+/**
+ * Updates status or video links (Used by GitHub Actions later)
+ */
+export async function updateVideo(videoId, data) {
+  try {
+    const db = getAdminDb();
+    if (!db) return false;
+    await db.collection('videos').doc(videoId).update({
+      ...data,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    return true;
+  } catch (error) {
+    logger.error('updateVideo Error:', error);
+    return false;
   }
-  return cachedStorage;
 }
 
-// Direct exports for route compatibility
-export const adminDb = getAdminDb();
-export const adminStorage = getAdminStorage();
-
-// --- DATABASE OPERATIONS ---
-
+/**
+ * Fetches the list of videos for your dashboard
+ */
 export async function getVideos(limitCount = 50) {
   try {
     const db = getAdminDb();
-    if (!db) return []; // Graceful fallback if DB isn't ready
-
-    const snapshot = await db
-      .collection('videos')
-      .orderBy('createdAt', 'desc')
-      .limit(limitCount)
-      .get()
-    
+    if (!db) return [];
+    const snapshot = await db.collection('videos').orderBy('createdAt', 'desc').limit(limitCount).get();
     return snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
       createdAt: doc.data().createdAt?.toDate()?.toISOString() || null,
-      updatedAt: doc.data().updatedAt?.toDate()?.toISOString() || null,
     }));
   } catch (error) {
-    logger.error('Error getting videos:', error);
-    return []; // Return empty instead of crashing
+    logger.error('getVideos Error:', error);
+    return [];
   }
 }
 
-// ... include your createVideo, updateVideo, and upload functions below
+// Compatibility constants
+export const adminDb = getAdminDb();
+export const adminStorage = getAdminStorage();
