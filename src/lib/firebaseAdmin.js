@@ -4,7 +4,11 @@ import { getFirestore } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
 import logger from '@/lib/logger'
 
-// 1. INITIALIZATION LOGIC
+/**
+ * FINAL INITIALIZATION LOGIC
+ * Designed to prevent "16 UNAUTHENTICATED" errors by strictly 
+ * formatting the Private Key for Google OAuth2.
+ */
 const initializeFirebase = () => {
   if (admin.apps.length > 0) return admin.apps[0];
 
@@ -13,74 +17,61 @@ const initializeFirebase = () => {
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
   if (!projectId || !clientEmail || !privateKey) {
-    logger.warn('Firebase variables missing. Skipping init.');
+    logger.warn('Firebase environment variables are missing.');
     return null;
   }
 
   try {
-    const cleanKey = privateKey.replace(/\\n/g, '\n').replace(/^"(.*)"$/, '$1').trim();
+    // Aggressive cleaning to fix OAuth2 credential issues
+    const cleanKey = privateKey
+      .replace(/\\n/g, '\n')           // Fixes escaped newlines
+      .replace(/^"(.*)"$/, '$1')      // Removes outer quotes
+      .replace(/"""/g, '"')           // Fixes triple quotes
+      .trim();
+
     return admin.initializeApp({
-      credential: admin.credential.cert({ projectId, clientEmail, privateKey: cleanKey }),
+      credential: admin.credential.cert({
+        projectId: projectId,
+        clientEmail: clientEmail,
+        privateKey: cleanKey,
+      }),
       storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
     });
   } catch (error) {
-    logger.error('Firebase Init Error:', error.message);
+    logger.error('Firebase Admin Initialization Failed:', error.message);
     return null;
   }
 }
 
 const app = initializeFirebase();
 
-// 2. EXPORTED HELPER FUNCTIONS
-// These are the "Exports" your other files use!
-export function getAdminDb() { return app ? getFirestore(app) : null; }
-export function getAdminStorage() { return app ? getStorage(app).bucket() : null; }
+// --- EXPORTED DATABASE FUNCTIONS ---
 
-/**
- * Adds a new video to the 'videos' collection
- */
+export function getAdminDb() {
+  return app ? getFirestore(app) : null;
+}
+
 export async function createVideo(data) {
   try {
     const db = getAdminDb();
-    if (!db) throw new Error("Database not initialized");
+    if (!db) throw new Error("Database not initialized - Check Private Key format");
 
     const docRef = await db.collection('videos').add({
       ...data,
       status: data.status || 'queued',
-      progress: 0,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    logger.info(`Video record created: ${docRef.id}`);
+    logger.info(`Successfully created video in Firebase: ${docRef.id}`);
     return docRef.id;
   } catch (error) {
-    logger.error('createVideo Error:', error);
-    throw error;
+    logger.error('Firestore createVideo failed:', error.message);
+    throw error; // Let the route handle the error message
   }
 }
 
-/**
- * Updates status or video links (Used by GitHub Actions later)
- */
-export async function updateVideo(videoId, data) {
-  try {
-    const db = getAdminDb();
-    if (!db) return false;
-    await db.collection('videos').doc(videoId).update({
-      ...data,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-    return true;
-  } catch (error) {
-    logger.error('updateVideo Error:', error);
-    return false;
-  }
-}
-
-/**
- * Fetches the list of videos for your dashboard
- */
+// Keeping these for dashboard compatibility
 export async function getVideos(limitCount = 50) {
   try {
     const db = getAdminDb();
@@ -92,11 +83,9 @@ export async function getVideos(limitCount = 50) {
       createdAt: doc.data().createdAt?.toDate()?.toISOString() || null,
     }));
   } catch (error) {
-    logger.error('getVideos Error:', error);
     return [];
   }
 }
 
-// Compatibility constants
+// Named exports to ensure no "not a function" conflicts
 export const adminDb = getAdminDb();
-export const adminStorage = getAdminStorage();
