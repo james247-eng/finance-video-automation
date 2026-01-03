@@ -1,23 +1,30 @@
+import { NextRequest, NextResponse } from 'next/server';
 import { createVideo } from '@/lib/firebaseAdmin';
 import logger from '@/lib/logger';
 
-export default async function handler(req, res) {
-  // 1. Security Check
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+export const dynamic = 'force-dynamic';
 
-  const apiKey = req.headers['x-api-key'];
+export async function POST(request) {
+  // 1. Security Check - validate API key
+  const apiKey = request.headers.get('x-api-key');
   if (apiKey !== process.env.API_SECRET_KEY) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid API Key' });
+    logger.warn('Unauthorized API key attempt');
+    return NextResponse.json(
+      { error: 'Unauthorized: Invalid API Key' },
+      { status: 401 }
+    );
   }
 
   try {
-    const { script, title, videoLength } = req.body;
+    // Parse request body
+    const { script, title, videoLength } = await request.json();
 
     // 2. Validate inputs
     if (!script || !title || !videoLength) {
-      return res.status(400).json({ error: 'Missing required fields: script, title, videoLength' });
+      return NextResponse.json(
+        { error: 'Missing required fields: script, title, videoLength' },
+        { status: 400 }
+      );
     }
 
     // 3. Process script into AI-generated scenes using Groq
@@ -74,19 +81,22 @@ export default async function handler(req, res) {
       throw new Error(`Failed to trigger GitHub Actions: ${errorText}`);
     }
 
-    logger.info(`Successfully triggered GitHub Actions for video ${videoId}`);
-
-    // 6. Respond to frontend with 202 Accepted (processing has started)
-    return res.status(202).json({
-      success: true,
-      videoId,
-      message: 'Video queued for rendering on GitHub Actions',
-      sceneCount: scenes.length,
-      estimatedTime: '2-5 minutes depending on queue'
-    });
+    logger.NextResponse.json(
+      {
+        success: true,
+        videoId,
+        message: 'Video queued for rendering on GitHub Actions',
+        sceneCount: scenes.length,
+        estimatedTime: '2-5 minutes depending on queue'
+      },
+      { status: 202 }
+    );
 
   } catch (error) {
     logger.error('API Error:', error);
-    return res.status(500).json({ error: error.message });
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    );
   }
 }
