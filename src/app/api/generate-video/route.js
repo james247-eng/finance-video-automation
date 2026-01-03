@@ -81,7 +81,9 @@ export async function POST(request) {
       throw new Error(`Failed to trigger GitHub Actions: ${errorText}`);
     }
 
-    logger.NextResponse.json(
+    logger.info(`Successfully triggered GitHub Actions for video ${videoId}`);
+
+    return NextResponse.json(
       {
         success: true,
         videoId,
