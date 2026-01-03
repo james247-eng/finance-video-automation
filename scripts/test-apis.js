@@ -1,6 +1,5 @@
 // Test script to verify all APIs are configured correctly
 // Run with: npm run test-apis
-
 require('dotenv').config({ path: '.env.local' })
 
 async function testGroq() {
