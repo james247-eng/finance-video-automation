@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Production
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Vercel
+.vercel
+
+# Firebase
+firebase-adminsdk.json
+serviceAccountKey.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Media files
+*.mp4
+*.mp3
+*.wav
+*.png
+
+# Generated files
+logs/
+temp/
+output/
+
+# Temporary
+*.tmp
+*.bak
+
+*.jpg
+*.jpeg
+*.gif
+temp/
+output/

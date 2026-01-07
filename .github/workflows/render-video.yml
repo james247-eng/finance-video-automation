@@ -1,0 +1,54 @@
+name: Render Video Worker
+on:
+  repository_dispatch:
+    types: [start-video-render]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Process Video (All-in-One)
+        run: node scripts/render.js
+        env:
+          VIDEO_ID: ${{ github.event.client_payload.videoId }}
+          SCENES: ${{ toJSON(github.event.client_payload.scenes) }}
+
+          # Firebase
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ vars.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}
+
+          # AI Services
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+
+          NODE_ENV: production
+
+      - name: Update Status on Failure
+        if: failure()
+        run: |
+          node -e "
+          const admin = require('firebase-admin');
+          const serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf-8'));
+          admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+          admin.firestore().collection('videos').doc(process.env.VIDEO_ID).update({
+            status: 'failed',
+            errorMessage: 'Video processing failed in GitHub Actions',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }).then(() => process.exit(0)).catch(() => process.exit(1));
+          "
+        env:
+          VIDEO_ID: ${{ github.event.client_payload.videoId }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
