@@ -2,9 +2,10 @@ import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import fs from 'fs'
 import path from 'path'
-// below i want co-pilot to help me correct all my import paths to be from src/utils instead of src/utils/lib
 
-import { generateStickFigureImage } from '../lib/stickFigureGenerator.js'
+//import { generateStickFigureImage } from '../lib/stickFigureGenerator.js'
+
+import { generateTextFrame } from '../lib/textFrameGenerator.js' // Adjusted import path  FROM STICK FIGURE GENERATOR TO TEXT FRAME GENERATOR
 import { generateVoiceoverFromScenes } from '../lib/elevenlabs.js'
 import { updateVideo, uploadVideoToStorage, uploadImageToStorage } from '../lib/firebaseAdmin.js'
 import logger from '../lib/logger.js'
@@ -43,10 +44,7 @@ export async function processVideo(videoId, scenes) {
       logger.info(`Generating image for scene ${i + 1}/${scenes.length}`)
       
       try {
-        const imageBuffer = await generateStickFigureImage(
-          scene.imagePrompt,
-          scene.sceneNumber
-        )
+        const imageBuffer = await generateTextFrame(scene, scene.sceneNumber)
         
         const imagePath = path.join(TEMP_DIR, `${videoId}_scene_${i}.png`)
         fs.writeFileSync(imagePath, imageBuffer)
