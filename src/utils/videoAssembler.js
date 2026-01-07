@@ -214,12 +214,10 @@ function cleanupTempFiles(videoId, imagePaths, voiceoverPath, videoPath) {
 }
 
 */
-
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import fs from 'fs'
 import path from 'path'
-
 import { generateTextFrame } from '../lib/textFrameGenerator.js'
 import { generateVoiceoverFromScenes } from '../lib/elevenlabs.js'
 import { updateVideo, uploadVideoToStorage } from '../lib/firebaseAdmin.js'
@@ -235,121 +233,86 @@ if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true })
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true })
 
 export async function processVideo(videoId, scenes) {
-  logger.info(`🚀 Starting PREMIUM render for ${videoId}`)
-  
   try {
     const imagePaths = []
     
-    // 1. Generate High-Impact Frames
+    // Step 1: Create Assets
     for (let i = 0; i < scenes.length; i++) {
-      const imageBuffer = await generateTextFrame(scenes[i], i + 1)
-      const imagePath = path.join(TEMP_DIR, `${videoId}_scene_${i}.png`)
-      fs.writeFileSync(imagePath, imageBuffer)
-      imagePaths.push(imagePath)
-      
-      await updateVideo(videoId, { progress: 20 + Math.floor((i / scenes.length) * 30) })
+      const buffer = await generateTextFrame(scenes[i], i + 1)
+      const imgPath = path.join(TEMP_DIR, `${videoId}_${i}.png`)
+      fs.writeFileSync(imgPath, buffer)
+      imagePaths.push(imgPath)
     }
 
-    // 2. Generate Voiceover
     const voiceoverBuffer = await generateVoiceoverFromScenes(scenes)
-    const voiceoverPath = path.join(TEMP_DIR, `${videoId}_voiceover.mp3`)
-    fs.writeFileSync(voiceoverPath, voiceoverBuffer)
+    const voPath = path.join(TEMP_DIR, `${videoId}_vo.mp3`)
+    fs.writeFileSync(voPath, voiceoverBuffer)
 
-    // 3. Assemble with Cinematic Motion
+    // Step 2: Assemble
     const outputPath = path.join(OUTPUT_DIR, `${videoId}.mp4`)
-    await assembleVideoCinematic(videoId, scenes, imagePaths, voiceoverPath, outputPath)
+    await assemblePremiumVideo(videoId, scenes, imagePaths, voPath, outputPath)
 
-    // 4. Upload Result
+    // Step 3: Finalize
     const videoBuffer = fs.readFileSync(outputPath)
     const videoUrl = await uploadVideoToStorage(videoBuffer, videoId, `Video ${videoId}`)
 
-    await updateVideo(videoId, {
-      status: 'completed',
-      videoUrl,
-      progress: 100
-    })
-
-    cleanupTempFiles(videoId, imagePaths, voiceoverPath, outputPath)
+    await updateVideo(videoId, { status: 'completed', videoUrl, progress: 100 })
     return videoUrl
-
   } catch (error) {
-    logger.error('Video Processing Failed:', error)
-    await updateVideo(videoId, { status: 'failed', errorMessage: error.message })
+    logger.error('Render process failed:', error)
     throw error
   }
 }
 
-function assembleVideoCinematic(videoId, scenes, imagePaths, voiceoverPath, outputPath) {
+function assemblePremiumVideo(videoId, scenes, imagePaths, voPath, outputPath) {
   return new Promise((resolve, reject) => {
-    const concatFilePath = path.join(TEMP_DIR, `${videoId}_concat.txt`)
-    let concatContent = ''
-    
-    imagePaths.forEach((imgPath, i) => {
-      concatContent += `file '${imgPath}'\nduration ${scenes[i].duration}\n`
-    })
-    // FFmpeg quirk: last file must be repeated
-    concatContent += `file '${imagePaths[imagePaths.length - 1]}'`
-    fs.writeFileSync(concatFilePath, concatContent)
+    const concatPath = path.join(TEMP_DIR, `${videoId}_list.txt`)
+    // Correcting the concat format: file path, then duration, then repeat last file
+    const content = imagePaths.map((p, i) => `file '${path.resolve(p)}'\nduration ${scenes[i].duration}`).join('\n') + `\nfile '${path.resolve(imagePaths[imagePaths.length - 1])}'`
+    fs.writeFileSync(concatPath, content)
 
     const musicPath = path.join(ASSETS_DIR, 'bg_music.mp3')
-    const hasMusic = fs.existsSync(musicPath)
+    const useMusic = fs.existsSync(musicPath)
 
-    let command = ffmpeg()
-      .input(concatFilePath)
-      .inputOptions(['-f', 'concat', '-safe', '0'])
+    let cmd = ffmpeg()
+      .input(concatPath).inputOptions(['-f', 'concat', '-safe', '0'])
+      .input(voPath)
 
-    if (hasMusic) {
-      command = command.input(musicPath).inputOptions(['-stream_loop', '-1'])
-    }
+    if (useMusic) cmd.input(musicPath).inputOptions(['-stream_loop', '-1'])
 
-    command = command.input(voiceoverPath)
-
-    command
-      .complexFilter([
-        // MOTION: Apply slow zoom (Ken Burns) to the image sequence
-        {
-          filter: 'zoompan',
-          options: {
-            z: 'zoom+0.001',
-            d: 1, // continuous zoom
-            x: 'iw/2-(iw/zoom/2)',
-            y: 'ih/2-(ih/zoom/2)',
-            s: '1920x1080',
-            fps: 30
-          },
-          inputs: '0:v',
-          outputs: 'v_zoomed'
+    // The Filter Stack: Motion + Pacing + Branding
+    cmd.complexFilter([
+      // Apply Ken Burns Zoom that respects the scene duration
+      // zoom+0.002 = speed of zoom
+      // s=1920x1080 = output size
+      {
+        filter: 'zoompan',
+        options: {
+          z: 'zoom+0.0012',
+          x: 'iw/2-(iw/zoom/2)',
+          y: 'ih/2-(ih/zoom/2)',
+          d: '25*10', // Calculate frames for up to 10s per scene
+          s: '1920x1080',
+          fps: 25
         },
-        // VIGNETTE: Darken edges to focus on central text
-        {
-          filter: 'vignette',
-          options: { angle: '0.3' },
-          inputs: 'v_zoomed',
-          outputs: 'v_final'
-        },
-        // AUDIO MIXING: Mix VO and Background Music
-        hasMusic 
-          ? '[1:a]volume=0.12[bg]; [2:a]volume=1.0[vo]; [vo][bg]amix=inputs=2:duration=first[a_final]'
-          : '[1:a]volume=1.0[a_final]'
-      ])
-      .outputOptions([
-        '-map [v_final]',
-        '-map [a_final]',
-        '-c:v libx264',
-        '-pix_fmt yuv420p',
-        '-crf 18',
-        '-preset fast',
-        '-shortest' // End video when VO ends
-      ])
-      .on('end', () => resolve(outputPath))
-      .on('error', (err) => reject(err))
-      .save(outputPath)
+        inputs: '0:v', outputs: 'v1'
+      },
+      // Audio mix: Background music at 12% volume, VO at 100%
+      useMusic 
+        ? '[1:a]volume=1.0[vo]; [2:a]volume=0.12[bg]; [vo][bg]amix=inputs=2:duration=first[aout]'
+        : '[1:a]volume=1.0[aout]'
+    ])
+    .outputOptions([
+      '-map [v1]',
+      '-map [aout]',
+      '-c:v libx264',
+      '-pix_fmt yuv420p',
+      '-preset fast',
+      '-crf 18',
+      '-shortest'
+    ])
+    .on('end', () => resolve(outputPath))
+    .on('error', (e) => reject(e))
+    .save(outputPath)
   })
-}
-
-function cleanupTempFiles(videoId, imagePaths, voiceoverPath, videoPath) {
-  // Logic remains as in your original file...
-  // Just ensure concat file is also removed
-  const concatFilePath = path.join(TEMP_DIR, `${videoId}_concat.txt`)
-  if (fs.existsSync(concatFilePath)) fs.unlinkSync(concatFilePath)
 }
