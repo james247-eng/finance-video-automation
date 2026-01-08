@@ -218,7 +218,8 @@ import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import fs from 'fs'
 import path from 'path'
-import { generateTextFrame } from '../lib/textFrameGenerator.js'
+import axios from 'axios'
+
 import { generateVoiceoverFromScenes } from '../lib/elevenlabs.js'
 import { updateVideo, uploadVideoToStorage } from '../lib/firebaseAdmin.js'
 import logger from '../lib/logger.js'
@@ -227,92 +228,99 @@ ffmpeg.setFfmpegPath(ffmpegStatic)
 
 const OUTPUT_DIR = path.join(process.cwd(), 'output')
 const TEMP_DIR = path.join(process.cwd(), 'temp')
-const ASSETS_DIR = path.join(process.cwd(), 'assets')
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true })
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true })
 
-export async function processVideo(videoId, scenes) {
+/**
+ * Fetches background from Pixabay
+ */
+async function getPixabayBackground(query) {
   try {
-    const imagePaths = []
-    
-    // Step 1: Create Assets
-    for (let i = 0; i < scenes.length; i++) {
-      const buffer = await generateTextFrame(scenes[i], i + 1)
-      const imgPath = path.join(TEMP_DIR, `${videoId}_${i}.png`)
-      fs.writeFileSync(imgPath, buffer)
-      imagePaths.push(imgPath)
-    }
-
-    const voiceoverBuffer = await generateVoiceoverFromScenes(scenes)
-    const voPath = path.join(TEMP_DIR, `${videoId}_vo.mp3`)
-    fs.writeFileSync(voPath, voiceoverBuffer)
-
-    // Step 2: Assemble
-    const outputPath = path.join(OUTPUT_DIR, `${videoId}.mp4`)
-    await assemblePremiumVideo(videoId, scenes, imagePaths, voPath, outputPath)
-
-    // Step 3: Finalize
-    const videoBuffer = fs.readFileSync(outputPath)
-    const videoUrl = await uploadVideoToStorage(videoBuffer, videoId, `Video ${videoId}`)
-
-    await updateVideo(videoId, { status: 'completed', videoUrl, progress: 100 })
-    return videoUrl
-  } catch (error) {
-    logger.error('Render process failed:', error)
-    throw error
+    const apiKey = process.env.PIXABAY_API_KEY;
+    const url = `https://pixabay.com/api/videos/?key=${apiKey}&q=${encodeURIComponent(query)}&video_type=film&per_page=3`;
+    const res = await axios.get(url);
+    // Return the high-quality link of the first relevant result
+    return res.data.hits[0]?.videos?.medium?.url;
+  } catch (err) {
+    logger.warn('Pixabay fail, using fallback gradient');
+    return "https://videos.pexels.com/video-files/3129957/3129957-uhd_2560_1440_25fps.mp4";
   }
 }
 
-function assemblePremiumVideo(videoId, scenes, imagePaths, voPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    const concatPath = path.join(TEMP_DIR, `${videoId}_list.txt`)
-    // Correcting the concat format: file path, then duration, then repeat last file
-    const content = imagePaths.map((p, i) => `file '${path.resolve(p)}'\nduration ${scenes[i].duration}`).join('\n') + `\nfile '${path.resolve(imagePaths[imagePaths.length - 1])}'`
-    fs.writeFileSync(concatPath, content)
+/**
+ * Creates the .ass subtitle file for word-level sync
+ */
+function createSubtitleFile(alignment, outputPath) {
+  const { characters, character_start_times_seconds, character_end_times_seconds } = alignment;
+  
+  let words = [];
+  let currentWord = "";
+  let wordStart = character_start_times_seconds[0];
 
-    const musicPath = path.join(ASSETS_DIR, 'bg_music.mp3')
-    const useMusic = fs.existsSync(musicPath)
+  characters.forEach((char, i) => {
+    currentWord += char;
+    if (char === " " || i === characters.length - 1) {
+      words.push({
+        text: currentWord.trim(),
+        start: wordStart,
+        end: character_end_times_seconds[i]
+      });
+      currentWord = "";
+      wordStart = character_start_times_seconds[i + 1];
+    }
+  });
 
-    let cmd = ffmpeg()
-      .input(concatPath).inputOptions(['-f', 'concat', '-safe', '0'])
-      .input(voPath)
+  const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Impact,80,&H00FFFFFF,&H0000D7FF,&H80000000,&H00000000,-1,0,0,0,100,100,2,0,1,4,0,2,10,10,120,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
 
-    if (useMusic) cmd.input(musicPath).inputOptions(['-stream_loop', '-1'])
+  const events = words.map(w => {
+    const start = new Date(w.start * 1000).toISOString().substr(11, 11).replace('T', '');
+    const end = new Date(w.end * 1000).toISOString().substr(11, 11).replace('T', '');
+    return `Dialogue: 0,${start},${end},Default,,0,0,0,,${w.text}`;
+  }).join('\n');
 
-    // The Filter Stack: Motion + Pacing + Branding
-    cmd.complexFilter([
-      // Apply Ken Burns Zoom that respects the scene duration
-      // zoom+0.002 = speed of zoom
-      // s=1920x1080 = output size
-      {
-        filter: 'zoompan',
-        options: {
-          z: 'zoom+0.0012',
-          x: 'iw/2-(iw/zoom/2)',
-          y: 'ih/2-(ih/zoom/2)',
-          d: '25*10', // Calculate frames for up to 10s per scene
-          s: '1920x1080',
-          fps: 25
-        },
-        inputs: '0:v', outputs: 'v1'
-      },
-      // Audio mix: Background music at 12% volume, VO at 100%
-      useMusic 
-        ? '[1:a]volume=1.0[vo]; [2:a]volume=0.12[bg]; [vo][bg]amix=inputs=2:duration=first[aout]'
-        : '[1:a]volume=1.0[aout]'
-    ])
-    .outputOptions([
-      '-map [v1]',
-      '-map [aout]',
-      '-c:v libx264',
-      '-pix_fmt yuv420p',
-      '-preset fast',
-      '-crf 18',
-      '-shortest'
-    ])
-    .on('end', () => resolve(outputPath))
-    .on('error', (e) => reject(e))
-    .save(outputPath)
-  })
+  fs.writeFileSync(outputPath, header + events);
+}
+
+export async function processVideo(videoId, scenes) {
+  logger.info(`🚀 Starting Pixabay-Synced Render for ${videoId}`)
+  
+  try {
+    // 1. Audio + Timestamps
+    const { audioBuffer, alignment } = await generateVoiceoverFromScenes(scenes)
+    const voPath = path.join(TEMP_DIR, `${videoId}_vo.mp3`)
+    fs.writeFileSync(voPath, audioBuffer)
+
+    // 2. Subtitles
+    const subPath = path.join(TEMP_DIR, `${videoId}.ass`)
+    createSubtitleFile(alignment, subPath)
+
+    // 3. Pixabay Background (Using first scene prompt)
+    const bgUrl = await getPixabayBackground(scenes[0].description || "abstract dark finance")
+
+    // 4. Final Render
+    const outputPath = path.join(OUTPUT_DIR, `${videoId}.mp4`)
+    
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(bgUrl).inputOptions(['-stream_loop', '-1'])
+        .input(voPath)
+        .complexFilter([
+          `subtitles=${subPath.replace(/\\/g, '/')}:force_style='Alignment=2',vignette=angle=0.3`
+        ])
+        .outputOptions(['-c:v libx264', '-pix_fmt yuv420p', '-shortest', '-map 0:v', '-map 1:a'])
+        .on('end', resolve)
+        .on('error', reject)
+        .save(outputPath)
+    })
+
+    const videoUrl = await uploadVideoToStorage(fs.readFileSync(outputPath), videoId, videoId)
+    await updateVideo(videoId, { status: 'completed', videoUrl, progress: 100 })
+    return videoUrl
+
+  } catch (error) {
+    logger.error('Render process failed:', error)
+    await updateVideo(videoId, { status: 'failed', errorMessage: error.message })
+    throw error
+  }
 }

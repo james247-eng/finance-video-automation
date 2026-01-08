@@ -34,6 +34,7 @@ jobs:
           CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
           CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
           CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
 
           # AI Services
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
