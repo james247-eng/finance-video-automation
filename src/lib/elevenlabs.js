@@ -184,7 +184,8 @@ export async function generateVoiceover(text, outputPath = null, voiceId = DEFAU
     
     // Switch to the timestamp-enabled endpoint
     const response = await axios.post(
-      `${ELEVENLABS_API_URL}/text-to-speech/${voiceId}/stream-with-timestamps`,
+     // `${ELEVENLABS_API_URL}/text-to-speech/${voiceId}/stream-with-timestamps`,
+      `${ELEVENLABS_API_URL}/text-to-speech/${voiceId}/stream/with-timestamps`,
       {
         text: text,
         model_id: "eleven_multilingual_v2",
